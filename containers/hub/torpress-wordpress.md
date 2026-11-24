@@ -9,3 +9,6 @@ Use the matching `torpress-db` and `torpress-tor` image tags. The
 [Torpress setup guide](https://github.com/VAIPROG/torpress#readme) covers secrets,
 installation, and upgrades. [Release notes](https://github.com/VAIPROG/torpress/releases)
 include digests for Linux amd64 and arm64.
+
+The image contains no default admin password. Choose one during CLI setup.
+[Инструкция на русском](https://github.com/VAIPROG/torpress/blob/master/RU.README.md)

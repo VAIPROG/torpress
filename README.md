@@ -1,5 +1,7 @@
 # Torpress
 
+[Русская документация](RU.README.md)
+
 Torpress helps small media outlets serve WordPress websites through the Tor network. It runs WordPress, MariaDB, and an onion service as separate Docker Compose services. The stack publishes no host ports. Use [Tor Browser](https://www.torproject.org/) to open the onion site.
 
 ## Set up a new site
@@ -16,7 +18,15 @@ for secret in db_password db_root_password wordpress_salt; do
 done
 ```
 
-The database and web containers reject missing secrets, common low-entropy patterns, and reuse among the secrets they consume. Keep these files private and retain them with the corresponding database and site backups. Set `TORPRESS_SECRETS_DIR` to use a different directory.
+The images contain no default passwords. Compose mounts the files you generate at runtime.
+
+| File | Purpose |
+| --- | --- |
+| `.secrets/db_password` | MariaDB password for the `wordpress` account. WordPress reads the same file. |
+| `.secrets/db_root_password` | MariaDB `root` password for local database administration. |
+| `.secrets/wordpress_salt` | Signing material for WordPress sessions and cookies. |
+
+Each file must contain one independent, random 64-character hexadecimal value. Keep the files private and back them up with the database. Set `TORPRESS_SECRETS_DIR` to use a different directory. MariaDB sets its account passwords when the data volume is first initialized. For an existing volume, rotate the accounts in MariaDB and update the matching secret files before restarting the services.
 
 Build the images and start the private services:
 
@@ -43,12 +53,14 @@ printf '%s' "$admin_password" |
 unset admin_password
 ```
 
-The password must be at least 20 bytes. The web installer is disabled. Once WordPress is installed, enable the onion service:
+The administrator password is separate from the database passwords and must be at least 20 bytes. Save it in your password manager. After installation, sign in with the chosen username and password at `http://<onion-host>/wp-admin/`. The web installer is disabled. Once WordPress is installed, enable the onion service:
 
 ```bash
 docker compose --profile onion up -d tor
 printf 'http://%s\n' "$onion_host"
 ```
+
+If you lose the administrator password, run `docker compose exec -T --user www-data wordpress wp user reset-password operator --skip-email --show-password` in a private terminal. Replace `operator` with the actual username and save the generated password in your password manager.
 
 ## Update or migrate an existing site
 
