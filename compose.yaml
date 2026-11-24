@@ -1,0 +1,94 @@
+name: torpress
+
+services:
+  db:
+    build:
+      context: .
+      target: db
+    command: ["--local-infile=0", "--skip-name-resolve"]
+    environment:
+      MARIADB_DATABASE: wordpress
+      MARIADB_USER: wordpress
+      MARIADB_PASSWORD_FILE: /run/secrets/db_password
+      MARIADB_ROOT_HOST: localhost
+      MARIADB_ROOT_PASSWORD_FILE: /run/secrets/db_root_password
+    secrets: [db_password, db_root_password]
+    volumes:
+      - db_data:/var/lib/mysql
+    networks: [backend]
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    security_opt: [no-new-privileges:true]
+    cap_drop: [NET_RAW]
+    restart: unless-stopped
+
+  wordpress:
+    build:
+      context: .
+      target: wordpress
+    environment:
+      WP_CLI_CACHE_DIR: /tmp/wp-cli-cache
+    secrets: [db_password, wordpress_salt]
+    volumes:
+      - wordpress_content:/usr/src/wordpress/wp-content
+    networks: [frontend, backend]
+    depends_on:
+      db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wp", "core", "is-installed", "--allow-root", "--url=http://127.0.0.1", "--skip-plugins", "--skip-themes"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 10s
+    read_only: true
+    tmpfs:
+      - /run
+      - /tmp:mode=1777
+      - /var/www/html
+    security_opt: [no-new-privileges:true]
+    cap_drop: [NET_RAW]
+    restart: unless-stopped
+
+  tor:
+    profiles: [onion]
+    build:
+      context: .
+      target: tor
+    volumes:
+      - tor_data:/var/lib/tor
+    networks: [frontend, egress]
+    depends_on:
+      wordpress:
+        condition: service_healthy
+        restart: true
+    read_only: true
+    tmpfs:
+      - /tmp:mode=1777
+    security_opt: [no-new-privileges:true]
+    cap_drop: [ALL]
+    restart: unless-stopped
+
+networks:
+  frontend:
+    internal: true
+  backend:
+    internal: true
+  egress: {}
+
+volumes:
+  db_data:
+  wordpress_content:
+  tor_data:
+
+secrets:
+  db_password:
+    file: ${TORPRESS_SECRETS_DIR:-./.secrets}/db_password
+  db_root_password:
+    file: ${TORPRESS_SECRETS_DIR:-./.secrets}/db_root_password
+  wordpress_salt:
+    file: ${TORPRESS_SECRETS_DIR:-./.secrets}/wordpress_salt

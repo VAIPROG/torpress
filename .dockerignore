@@ -1,0 +1,12 @@
+*
+!Dockerfile
+!files/
+!files/apache-hardening.conf
+!files/db-start.sh
+!files/onion-hostname.sh
+!files/php-hardening.ini
+!files/torrc
+!files/verify-secrets.sh
+!files/wordpress-config.php
+!files/wordpress-install.php
+!files/wordpress-start.sh
