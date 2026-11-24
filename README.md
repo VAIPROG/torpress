@@ -60,6 +60,8 @@ docker compose --profile onion up -d tor
 printf 'http://%s\n' "$onion_host"
 ```
 
+If you lose the administrator password, run `docker compose exec -T --user www-data wordpress wp user reset-password operator --skip-email --show-password` in a private terminal. Replace `operator` with the actual username and save the generated password in your password manager.
+
 ## Update or migrate an existing site
 
 - Back up the database, `wp-content`, the Tor identity, and secrets before updating. Treat the onion service key as a private credential.
