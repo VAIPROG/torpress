@@ -1,0 +1,10 @@
+services:
+  db:
+    build: !reset null
+    image: "docker.io/${DOCKERHUB_USERNAME:-vaiprog}/torpress-db:${TORPRESS_IMAGE_TAG:-latest}"
+  wordpress:
+    build: !reset null
+    image: "docker.io/${DOCKERHUB_USERNAME:-vaiprog}/torpress-wordpress:${TORPRESS_IMAGE_TAG:-latest}"
+  tor:
+    build: !reset null
+    image: "docker.io/${DOCKERHUB_USERNAME:-vaiprog}/torpress-tor:${TORPRESS_IMAGE_TAG:-latest}"

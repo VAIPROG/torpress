@@ -1,0 +1,216 @@
+name: Publish Torpress
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: torpress-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      publish: ${{ steps.check.outputs.publish }}
+      prerelease: ${{ steps.check.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check release tag and credentials
+        id: check
+        env:
+          REGISTRY_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version='(0|[1-9][0-9]*)'
+          if [[ ! $GITHUB_REF_NAME =~ ^v$version\.$version\.$version(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ || ${#GITHUB_REF_NAME} -gt 128 ]]; then
+            echo "::error::Expected a version tag such as v1.2.3 or v1.2.3-rc.1."
+            exit 1
+          fi
+          if ! git merge-base --is-ancestor HEAD refs/remotes/origin/master; then
+            echo "::error::The release commit must be reachable from master."
+            exit 1
+          fi
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "A GitHub release already exists for this tag." >> "$GITHUB_STEP_SUMMARY"
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ -z $REGISTRY_USER || -z $TOKEN ]]; then
+            echo "::warning::Set DOCKERHUB_USERNAME and DOCKERHUB_TOKEN to publish Torpress."
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          if [[ ! $REGISTRY_USER =~ ^[a-z0-9]+([_-][a-z0-9]+)*$ ]]; then
+            echo "::error::DOCKERHUB_USERNAME is not a valid Docker Hub namespace."
+            exit 1
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          if [[ $GITHUB_REF_NAME == *-* ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  images:
+    name: Publish torpress-${{ matrix.target }}
+    needs: verify
+    if: needs.verify.outputs.publish == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: wordpress
+            description: Hardened WordPress and Apache for a Torpress onion site
+          - target: db
+            description: MariaDB with validated secrets for Torpress
+          - target: tor
+            description: Tor v3 onion service for a Torpress WordPress site
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4
+        with:
+          platforms: arm64
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
+        id: meta
+        env:
+          DOCKER_METADATA_ANNOTATIONS_LEVELS: manifest,index
+        with:
+          images: docker.io/${{ vars.DOCKERHUB_USERNAME }}/torpress-${{ matrix.target }}
+          flavor: latest=false
+          tags: type=ref,event=tag
+          labels: |
+            org.opencontainers.image.title=torpress-${{ matrix.target }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+          annotations: |
+            org.opencontainers.image.title=torpress-${{ matrix.target }}
+            org.opencontainers.image.description=${{ matrix.description }}
+            org.opencontainers.image.version=${{ github.ref_name }}
+      - uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7
+        id: push
+        with:
+          context: .
+          target: ${{ matrix.target }}
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          annotations: ${{ steps.meta.outputs.annotations }}
+          provenance: mode=max
+          sbom: true
+      - name: Save the published digest
+        env:
+          TARGET: ${{ matrix.target }}
+          DIGEST: ${{ steps.push.outputs.digest }}
+        run: |
+          [[ $DIGEST =~ ^sha256:[0-9a-f]{64}$ ]]
+          printf '%s\n' "$DIGEST" > "$TARGET.digest"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: release-digest-${{ matrix.target }}
+          path: ${{ matrix.target }}.digest
+          if-no-files-found: error
+          retention-days: 7
+
+  release:
+    name: Promote images and create GitHub release
+    needs: [verify, images]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    concurrency:
+      group: torpress-release-promotion
+      cancel-in-progress: false
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          pattern: release-digest-*
+          merge-multiple: true
+      - uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4
+        if: needs.verify.outputs.prerelease == 'false'
+      - uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4
+        if: needs.verify.outputs.prerelease == 'false'
+        with:
+          username: ${{ vars.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Publish release notes with image digests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REGISTRY_USER: ${{ vars.DOCKERHUB_USERNAME }}
+          PRERELEASE: ${{ needs.verify.outputs.prerelease }}
+        run: |
+          release_flags=()
+          promote=false
+          if [[ $PRERELEASE == true ]]; then
+            release_flags+=(--prerelease)
+          else
+            latest=$(gh release list --repo "$GITHUB_REPOSITORY" --limit 100 \
+              --json isLatest,tagName --jq '.[] | select(.isLatest) | .tagName')
+            if [[ $latest =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] &&
+              [[ $(printf '%s\n' "$latest" "$GITHUB_REF_NAME" | sort -V | tail -n 1) != "$GITHUB_REF_NAME" ]]; then
+              release_flags+=(--latest=false)
+            else
+              promote=true
+              release_flags+=(--latest)
+            fi
+          fi
+          {
+            echo "## Docker Hub images"
+            echo
+            echo "Platforms are linux/amd64 and linux/arm64. Each image includes an SBOM and build provenance."
+            echo
+            for target in wordpress db tor; do
+              digest=$(cat "$target.digest")
+              [[ $digest =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+              image="$REGISTRY_USER/torpress-$target"
+              printf -- '- [%s:%s](https://hub.docker.com/r/%s/tags) · %s@%s\n' \
+                "$image" "$GITHUB_REF_NAME" "$image" "$image" "$digest"
+            done
+          } > release-notes.md
+
+          if [[ $promote == true ]]; then
+            for target in wordpress db tor; do
+              image="docker.io/$REGISTRY_USER/torpress-$target"
+              docker buildx imagetools create --tag "$image:latest" "$image@$(cat "$target.digest")"
+            done
+          fi
+          cat release-notes.md >> "$GITHUB_STEP_SUMMARY"
+          gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --verify-tag \
+            --generate-notes --notes-file release-notes.md "${release_flags[@]}"
+
+  dispatch-overviews:
+    name: Queue Docker Hub overview sync
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: write
+    steps:
+      - name: Dispatch overview workflow from master
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh workflow run hub.yml --repo "$GITHUB_REPOSITORY" --ref master; then
+            echo "::warning::Run the Docker Hub overviews workflow manually to refresh the descriptions."
+            exit 1
+          fi
