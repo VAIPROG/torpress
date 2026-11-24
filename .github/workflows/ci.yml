@@ -1,0 +1,35 @@
+name: Container CI
+
+on:
+  pull_request:
+    branches: [master]
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Build and smoke test (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { arch: amd64, runner: ubuntu-24.04 }
+          - { arch: arm64, runner: ubuntu-24.04-arm }
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Check the Docker Hub overviews and the release Compose file
+        run: |
+          bash containers/hub/sync.sh --dry-run
+          docker compose --profile onion -f compose.yaml -f compose.release.yaml config --images
+      - name: Build all three images
+        run: docker compose --profile onion build
+      - name: Test private provisioning
+        run: bash tests/smoke.sh

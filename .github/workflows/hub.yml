@@ -1,0 +1,37 @@
+name: Docker Hub overviews
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - ".github/workflows/hub.yml"
+      - "containers/hub/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: torpress-hub-overviews
+  cancel-in-progress: false
+
+jobs:
+  overviews:
+    if: github.ref == 'refs/heads/master'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: refs/heads/master
+          persist-credentials: false
+      - name: Update Docker Hub repository descriptions
+        env:
+          DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_OVERVIEW_TOKEN || secrets.DOCKERHUB_TOKEN }}
+        run: |
+          if [[ -z $DOCKERHUB_USERNAME || -z $DOCKERHUB_TOKEN ]]; then
+            echo "::warning::Set Docker Hub credentials to sync the overviews."
+            exit 0
+          fi
+          bash containers/hub/sync.sh

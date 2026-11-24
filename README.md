@@ -65,3 +65,24 @@ The stack uses upstream WordPress, PHP, Apache, MariaDB, and Tor packages. Apach
 The Apache 2.4.71 update includes the fix for [CVE-2026-119618](https://httpd.apache.org/security/vulnerabilities_24.html#CVE-2026-119618). PHP 8.6.0 includes fixes documented in the [PHP changelog](https://www.php.net/ChangeLog-8.php#8.6.0). Check the [Debian security tracker](https://security-tracker.debian.org/tracker/) for package backports and unresolved issues. Keep the Docker host patched too.
 
 After building, run `bash tests/smoke.sh` to check private provisioning, weak and reused secrets, the Apache policy, WordPress routing, and Tor identity generation. The test uses disposable volumes and keeps Tor networking disabled.
+
+## Use published images
+
+From a checkout of the [release tag](https://github.com/VAIPROG/torpress/releases), use Compose v2.24.4 or later. Set the same version tag for all three images, then use the release override with every Compose command in the setup guide.
+
+```bash
+export TORPRESS_IMAGE_TAG=$(git describe --tags --exact-match)
+compose=(docker compose -f compose.yaml -f compose.release.yaml)
+"${compose[@]}" --profile onion pull
+"${compose[@]}" up -d db wordpress
+```
+
+The override uses Docker Hub namespace `vaiprog` by default. Set `DOCKERHUB_USERNAME` for images published to a different namespace. GitHub release notes include the digest of each multi-platform image. The Docker Hub `latest` tag follows stable releases.
+
+## Publish a release
+
+Create `torpress-wordpress`, `torpress-db`, and `torpress-tor` in the Docker Hub namespace you use for releases. In **Settings → Secrets and variables → Actions** in GitHub, set the `DOCKERHUB_USERNAME` repository variable to that namespace and the `DOCKERHUB_TOKEN` repository secret to a Docker Hub access token with Read & Write permissions.
+
+The separate **Docker Hub overviews** workflow needs a token with **Read, Write & Delete** to edit repository descriptions. Set `DOCKERHUB_OVERVIEW_TOKEN` to give that permission to the overview workflow alone, or use a `DOCKERHUB_TOKEN` with that scope for both workflows. The overview workflow runs after a successful publication and when overview files change. You can also run it manually from `master`.
+
+Push a version tag such as `v1.2.3` or `v1.2.3-rc.1` on a tested commit from `master`. GitHub Actions builds and publishes all three images for `linux/amd64` and `linux/arm64`, adds OCI source and version metadata, attaches SBOMs and build provenance, and creates a GitHub release with digest-pinned references. Prereleases get their version tag. Each stable release can also update `latest`. GitHub supplies the workflow's token for creating the release.
