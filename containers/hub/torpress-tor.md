@@ -8,3 +8,5 @@ Use the matching `torpress-wordpress` and `torpress-db` image tags. See the
 [Torpress setup guide](https://github.com/VAIPROG/torpress#readme) to generate the
 hostname and start the service. [Release notes](https://github.com/VAIPROG/torpress/releases)
 include digests for Linux amd64 and arm64.
+
+[Инструкция на русском](https://github.com/VAIPROG/torpress/blob/master/RU.README.md)
